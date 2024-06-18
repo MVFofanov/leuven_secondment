@@ -1,0 +1,136 @@
+import os
+
+
+#SAMPLES = ["BE_16556", "DE_18031"]  # List your samples here
+
+SAMPLES = ["BE_16556_aut_ile", "UK_14501_spr_mid"]
+
+# Define directories and paths
+config = {
+    "working_dir": "/home/zo49sog/crassvirales/leuven_secondment",
+    #"read_dir": "/home/zo49sog/crassvirales/leuven_secondment/read_hives",
+    "read_dir": "/home/zo49sog/crassvirales/leuven_secondment/read",
+    "read_unpaired_dir": "/home/zo49sog/crassvirales/leuven_secondment/read_unpaired",
+    "read1_name": "e.ExBee.ExHuman_modified_R1.fastq.gz",
+    "read2_name": "e.ExBee.ExHuman_modified_R2.fastq.gz",
+
+    "output_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test",
+    "metaspades_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/metaspades_assembly",
+    "bbmap_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/bbmap_alignment",
+    "metabat_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/metabat_binning",
+    "checkm_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/checkm_qc",
+
+    "log_directory": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/logs"
+    }
+
+log_directory = config["log_directory"]
+
+input_files = [sample for sample in SAMPLES]
+
+output_dirs = (config["output_dir"], config["metaspades_dir"], config["bbmap_dir"],
+               config["metabat_dir"], config["checkm_dir"])
+
+# for output_dir in output_dirs:
+#     if not os.path.exists(output_dir):
+#         os.makedirs(output_dir)
+
+rule all:
+    input:
+        #expand("{output_dir}/checkm_qc/{sample}", output_dir=config["output_dir"], sample=SAMPLES)
+        #expand(f"{config['output_dir']}/checkm_qc/{{sample}}", sample=SAMPLES)
+        #expand(f"{config['read_dir']}/{{sample}}/", sample=SAMPLES)
+        expand("{checkm_dir}/{sample}", checkm_dir=config["checkm_dir"], sample=SAMPLES)
+        #expand("{config[output_dir]}/checkm_qc/{sample}", output_dir=config["output_dir"], sample=SAMPLES)
+        #expand(f"{config['read_dir']}/{{sample}}/{{sample}}.{config['read1_name']}", output=config["output_dir"], sample=SAMPLES)
+
+rule run_metaspades:
+    input:
+        r1=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read1_name']}",
+        r2=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read2_name']}",
+        s=f"{config['read_unpaired_dir']}/{{sample}}_e.ExBee.ExHuman.unpaired.fastq"
+    output:
+        scaffolds=config['metaspades_dir'] + "/{sample}/scaffolds.fasta"
+    params:
+        metaspades_path="/home/groups/VEO/tools/SPAdes/v3.15.5/metaspades.py",
+        out_dir=config['metaspades_dir'] + "/{sample}",
+        log=os.path.join(config['log_directory'],"{sample}","metaspades.log")
+    threads: 90
+    resources:
+        mem_mb=240000,
+        mem_gb=240
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        mkdir -p $(dirname {params.log})
+        
+        echo 'Running SPAdes with input R1: {input.r1}, R2: {input.r2}, unpaired: {input.s}' > {params.log} 2>&1
+        echo 'Directory $(dirname {output.scaffolds}) has been successfully created' >> {params.log} 2>&1
+
+        {params.metaspades_path} -1 {input.r1} -2 {input.r2} -s {input.s} \
+        -t {threads} -m {resources.mem_gb} --checkpoints all -o {params.out_dir} >> {params.log} 2>&1
+        
+        echo 'Metaspades has successfully completed genome assembly' >> {params.log} 2>&1
+        """
+
+rule run_bbmap:
+    input:
+        scaffolds=config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
+        r1=f"{config['read_dir']}/{{sample}}/{{sample}}.{config['read1_name']}",
+        r2=f"{config['read_dir']}/{{sample}}/{{sample}}.{config['read2_name']}"
+    output:
+        dir=directory(config["bbmap_dir"] + "/{sample}/"),
+        bam=config["bbmap_dir"] + "/{sample}/mapped.bam",
+        bam_sorted=config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+    params:
+        bbmap_path="/home/groups/VEO/tools/bbmap/v39.06/bbmap.sh",
+        log=os.path.join(config["log_directory"],"{sample}","bbmap.log")
+    threads: 90
+    shell:
+        """
+        mkdir -p {output.dir}
+        echo "Directory created: {output.dir}" >> {params.log}
+
+        {params.bbmap_path} ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+
+        samtools sort {output.bam} -o {output.bam_sorted} >> {params.log} 2>&1
+        echo "BAM sorting completed: {output.bam_sorted}" >> {params.log}
+
+        rm {output.bam}
+        echo "Removed unsorted BAM: {output.bam}" >> {params.log}
+        """
+
+rule run_metabat:
+    input:
+        scaffolds = config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
+        bam = config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+    output:
+        directory(config["metabat_dir"] + "/{sample}"),
+    params:
+        metabat_path = "/home/groups/VEO/tools/metabat/v2/bin/runMetaBat.sh",
+        log=os.path.join(config["log_directory"],"{sample}","metabat.log")
+    threads: 90
+    shell:
+        """
+        # mkdir {output}
+        cd {output}
+        
+        {params.metabat_path} {input.scaffolds} {input.bam} >> {params.log} 2>&1
+        """
+
+rule run_checkm:
+    input:
+        config["metabat_dir"] + "/{sample}"
+    output:
+        directory(config["checkm_dir"] + "/{sample}")
+    params:
+        checkm_activate = "source /vast/groups/VEO/tools/anaconda3/etc/profile.d/conda.sh && conda activate checkm_v1.2.2",
+        checkm_path = "checkm",
+        log=os.path.join(config["log_directory"],"{sample}","checkm.log")
+    threads: 90
+    shell:
+        """
+        # mkdir {output}
+        
+        {params.checkm_activate}
+        {params.checkm_path} lineage_wf {input} {output} -t {threads} -x fa >> {params.log} 2>&1
+        """

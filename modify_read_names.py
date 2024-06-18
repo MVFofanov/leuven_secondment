@@ -1,6 +1,7 @@
 import os
 import gzip
 
+
 def modify_read_names(input_file, output_file):
     basename = os.path.splitext(os.path.basename(input_file))[0]  # Extract basename of the file
     extension = os.path.splitext(input_file)[1]  # Extract extension of the file
