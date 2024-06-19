@@ -2,8 +2,8 @@ import os
 
 
 #SAMPLES = ["BE_16556", "DE_18031"]  # List your samples here
-
-SAMPLES = ["BE_16556_aut_ile", "UK_14501_spr_mid"]
+#SAMPLES = ["BE_16556_aut_ile", "UK_14501_spr_mid"]
+SAMPLES = ["UK_14501_spr_mid"]
 
 # Define directories and paths
 config = {
@@ -17,6 +17,7 @@ config = {
     "output_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test",
     "metaspades_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/metaspades_assembly",
     "bbmap_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/bbmap_alignment",
+    "bwa_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/bwa_alignment",
     "metabat_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/metabat_binning",
     "checkm_dir": "/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemake_pipeline/test/checkm_qc",
 
@@ -72,37 +73,112 @@ rule run_metaspades:
         echo 'Metaspades has successfully completed genome assembly' >> {params.log} 2>&1
         """
 
-rule run_bbmap:
+# rule run_bbmap:
+#     input:
+#         scaffolds=config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
+#         r1=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read1_name']}",
+#         r2=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read2_name']}"
+#     output:
+#         dir=directory(config["bbmap_dir"] + "/{sample}/"),
+#         bam=config["bbmap_dir"] + "/{sample}/mapped.bam",
+#         bam_sorted=config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+#     params:
+#         bbmap_path="/home/groups/VEO/tools/bbmap/v39.06/bbmap.sh",
+#         log=os.path.join(config["log_directory"],"{sample}","bbmap.log"),
+#         java_opts= "-Xmx10g"  # Adjust memory allocation here
+#     threads: 90
+#     shell:
+#         """
+#         mkdir -p {output.dir}
+#         echo "Directory created: {output.dir}" >> {params.log}
+#
+#         cd {output.dir}
+#
+#         #{params.bbmap_path} ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#         #java {params.java_opts} -cp {params.bbmap_path} align2.BBMap build=1 overwrite=true ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#         java -ea -Xms100g -Xmx100g -cp {params.bbmap_path}/* path=bbmap align2.BBMap build=1 overwrite=true fastareadlen=500 ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#
+#         samtools sort {output.bam} -o {output.bam_sorted} >> {params.log} 2>&1
+#         #echo "BAM sorting completed: {output.bam_sorted}" >> {params.log}
+#
+#         #rm {output.bam}
+#         #echo "Removed unsorted BAM: {output.bam}" >> {params.log}
+#         """
+
+rule run_bwa_index:
     input:
-        scaffolds=config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
-        r1=f"{config['read_dir']}/{{sample}}/{{sample}}.{config['read1_name']}",
-        r2=f"{config['read_dir']}/{{sample}}/{{sample}}.{config['read2_name']}"
+        ref="path/to/reference.fasta"
     output:
-        dir=directory(config["bbmap_dir"] + "/{sample}/"),
-        bam=config["bbmap_dir"] + "/{sample}/mapped.bam",
-        bam_sorted=config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+        "path/to/reference.fasta.bwt"
+    shell:
+        "bwa index {input.ref}"
+
+
+rule run_bwa_mem:
+    input:
+        ref=config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
+        r1=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read1_name']}",
+        r2=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read2_name']}"
+    output:
+        dir = directory(config["bwa_dir"] + "/{sample}/"),
+        bam_sorted=config["bwa_dir"] + "/{sample}/mapped_sorted.bam"
     params:
-        bbmap_path="/home/groups/VEO/tools/bbmap/v39.06/bbmap.sh",
-        log=os.path.join(config["log_directory"],"{sample}","bbmap.log")
+        bwa_path = "/home/groups/VEO/tools/bwa/v0.7.17/bwa",
+        log=os.path.join(config["log_directory"],"{sample}","bwa.log")
     threads: 90
     shell:
         """
         mkdir -p {output.dir}
         echo "Directory created: {output.dir}" >> {params.log}
+        cd {output.dir}
 
-        {params.bbmap_path} ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+        # Indexing the reference if not already indexed
+        {params.bwa_path} index {input.ref} >> {params.log} 2>&1
 
-        samtools sort {output.bam} -o {output.bam_sorted} >> {params.log} 2>&1
-        echo "BAM sorting completed: {output.bam_sorted}" >> {params.log}
+        # Aligning, sorting, and outputting sorted bam
+        {params.bwa_path} mem -t {threads} {input.ref} {input.r1} {input.r2} | 
+        samtools sort -o {output.bam_sorted} - >> {params.log} 2>&1
 
-        rm {output.bam}
-        echo "Removed unsorted BAM: {output.bam}" >> {params.log}
+        # Indexing the sorted bam file
+        samtools index {output.bam_sorted} >> {params.log} 2>&1
         """
+
+# rule run_bwa:
+#     input:
+#         scaffolds=config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
+#         r1=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read1_name']}",
+#         r2=f"{config['read_dir']}/{{sample}}/{{sample}}_{config['read2_name']}"
+#     output:
+#         dir=directory(config["bbmap_dir"] + "/{sample}/"),
+#         bam=config["bbmap_dir"] + "/{sample}/mapped.bam",
+#         bam_sorted=config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+#     params:
+#         bbmap_path="/home/groups/VEO/tools/bbmap/v39.06/bbmap.sh",
+#         log=os.path.join(config["log_directory"],"{sample}","bbmap.log"),
+#         java_opts="-Xmx10g"  # Adjust memory allocation here
+#     threads: 90
+#     shell:
+#         """
+#         mkdir -p {output.dir}
+#         echo "Directory created: {output.dir}" >> {params.log}
+#
+#         cd {output.dir}
+#
+#         #{params.bbmap_path} ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#         #java {params.java_opts} -cp {params.bbmap_path} align2.BBMap build=1 overwrite=true ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#         java -ea -Xms100g -Xmx100g -cp {params.bbmap_path}/* path=bbmap align2.BBMap build=1 overwrite=true fastareadlen=500 ref={input.scaffolds} in={input.r1} in2={input.r2} out={output.bam} threads={threads} >> {params.log} 2>&1
+#
+#         samtools sort {output.bam} -o {output.bam_sorted} >> {params.log} 2>&1
+#         #echo "BAM sorting completed: {output.bam_sorted}" >> {params.log}
+#
+#         #rm {output.bam}
+#         #echo "Removed unsorted BAM: {output.bam}" >> {params.log}
+#         """
 
 rule run_metabat:
     input:
         scaffolds = config["metaspades_dir"] + "/{sample}/scaffolds.fasta",
-        bam = config["bbmap_dir"] + "/{sample}/mapped_sorted.bam"
+        bam = config["bwa_dir"] + "/{sample}/mapped_sorted.bam"
     output:
         directory(config["metabat_dir"] + "/{sample}"),
     params:

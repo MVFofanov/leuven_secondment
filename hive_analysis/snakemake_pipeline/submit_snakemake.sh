@@ -17,4 +17,4 @@ working_dir="/home/zo49sog/crassvirales/leuven_secondment/hive_analysis/snakemak
 partition="interactive"
 
 # Run Snakemake
-snakemake --snakefile "${working_dir}/Snakefile" --jobs 3 --cluster "sbatch --output={log_directory}/{rule}/%x_%j.out.txt --time=3:00:00 --partition=${partition} --nodes=1 --ntasks=1 --cpus-per-task={threads} --mem={resources.mem_mb}MB" --latency-wait 120
+snakemake --snakefile "${working_dir}/Snakefile" --jobs 3 --cluster "sbatch --output={log_directory}/{rule}/%x_%j.out.txt --time=12:00:00 --partition=${partition} --nodes=1 --ntasks=1 --cpus-per-task={threads} --mem={resources.mem_mb}MB" --latency-wait 120
